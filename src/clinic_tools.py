@@ -1,29 +1,55 @@
+import sqlite3
 import datetime
 
-# Mocking a live clinical scheduling ledger
-DENTAL_CALENDAR_DB = {
-    "2026-08-18": ["09:00", "10:00", "14:00"],  # Booked slots
-    "2026-08-19": ["11:00", "15:00", "16:00"]
-}
+DB_FILE = "dental_clinic.db"
+
+def initialize_database():
+    """Establishes persistent SQLite relational schema configuration."""
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS appointments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                appointment_date TEXT NOT NULL,
+                appointment_time TEXT NOT NULL,
+                UNIQUE(appointment_date, appointment_time)
+            )
+        """)
+        # Insert initial mocked booked slots if table is empty
+        cursor.execute("SELECT COUNT(*) FROM appointments")
+        if cursor.fetchone()[0] == 0:
+            mock_data = [
+                ("2026-08-18", "09:00"),
+                ("2026-08-18", "10:00"),
+                ("2026-08-18", "14:00"),
+                ("2026-08-19", "11:00")
+            ]
+            cursor.executemany("INSERT INTO appointments (appointment_date, appointment_time) VALUES (?, ?)", mock_data)
+        conn.commit()
 
 CRITICAL_EMERGENCY_KEYWORDS = ["bleeding", "broken jaw", "trauma", "severe swelling", "accident"]
 
 def check_appointment_availability(date_str: str) -> str:
-    """Queries clinical schedules to isolate empty runtime blocks."""
+    """Queries persistent relational disk files to find unbooked openings."""
     try:
-        # Validate baseline ISO date parameters
         target_date = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
         date_key = str(target_date)
     except ValueError:
         return "❌ Error: Invalid structural format. Use YYYY-MM-DD format configuration."
     
+    initialize_database()
     all_slots = ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00"]
-    booked = DENTAL_CALENDAR_DB.get(date_key, [])
+    
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT appointment_time FROM appointments WHERE appointment_date = ?", (date_key,))
+        booked = [row[0] for row in cursor.fetchall()]
+        
     available_slots = [slot for slot in all_slots if slot not in booked]
     
     if not available_slots:
-        return f"📅 Configuration for {date_key}: Complete capacity reached. No openings found."
-    return f"📅 Open slots on {date_key}: {', '.join(available_slots)}"
+        return f"📅 Schedule for {date_key}: Full capacity. No open slots found."
+    return f"📅 Open persistent slots on {date_key}: {', '.join(available_slots)}"
 
 def screen_patient_severity(patient_notes: str) -> str:
     """Automated extraction logic to identify high-risk triage configurations."""
@@ -31,11 +57,10 @@ def screen_patient_severity(patient_notes: str) -> str:
     triggered_alerts = [word for word in CRITICAL_EMERGENCY_KEYWORDS if word in notes_lower]
     
     if triggered_alerts:
-        return f"🚨 CRITICAL TRIAGE ALERT: Immediate priority flagged. Trigger words identified: {triggered_alerts}. Route directly to trauma surgeons."
-    return "✅ ROUTINE TRIAGE: Case categorized as elective/standard operations. Proceed to standard calendar booking pipeline."
+        return f"🚨 CRITICAL TRIAGE ALERT: Immediate priority flagged. Trigger words identified: {triggered_alerts}."
+    return "✅ ROUTINE TRIAGE: Standard operational pipeline case."
 
 if __name__ == "__main__":
-    # Internal Unit Tests
+    initialize_database()
     print(check_appointment_availability("2026-08-18"))
-    print(screen_patient_severity("I need a routine cleaning next week."))
-    print(screen_patient_severity("Severe bleeding after tooth extraction accident!"))
+    
